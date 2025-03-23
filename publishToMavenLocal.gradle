@@ -1,0 +1,64 @@
+// 打包源代码
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    archiveClassifier = "sources"
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            // 获取本模块定义的 ext 变量，然后用其初始化 Maven 模板的坐标
+            groupId = project.ext.moduleGroupId
+            artifactId = project.ext.moduleArtifactId
+            version = project.ext.moduleVersion
+
+            // 上传 AAR 包
+            afterEvaluate { artifact(tasks.getByName("bundleReleaseAar")) }
+            // 向 Maven 仓库中上传源码
+            artifact sourceJar
+
+            // 将本 Gradle 模块的依赖转换到 pom.xml 文件中
+            pom.withXml {
+                def dependenciesNode = asNode().appendNode('dependencies')
+                configurations.implementation.allDependencies.each { dep ->
+                    // 依赖本项目其它模块，使用的是 implementation project(':模块名')，
+                    // 此代码中是不含完整的 Maven 坐标的，因此无法像普通依赖那样直接读取。
+                    // 必须先读取模块名，然后通过读取事先设置的 ext 变量才能读取到 Maven 坐标
+                    if (dep instanceof ProjectDependency) {
+                        def depNode = dependenciesNode.appendNode('dependency')
+                        // 读取本项目其它模块的模块名
+                        def moduleName = dep.name
+                        // 读取目标模块的 ext 变量组
+                        def moduleExt = project(":${moduleName}").ext
+
+                        def moduleGroupId = moduleExt.moduleGroupId
+                        def moduleArtifactId = moduleExt.moduleArtifactId
+                        def moduleVersion = moduleExt.moduleVersion
+                        depNode.appendNode('groupId', moduleGroupId)
+                        depNode.appendNode('artifactId', moduleArtifactId)
+                        depNode.appendNode('version', moduleVersion)
+//                        depNode.appendNode('scope', 'compile')
+                        println "源自本项目的依赖: ${moduleGroupId}:${moduleArtifactId}:${moduleVersion}"
+                    } else if (dep.group != null && dep.name != null) {
+                        // dep 会包含通过 implementation、api 引入的依赖，
+                        // 但不会包含通过 annotationProcessor、testImplementation、androidTestImplementation 引入的依赖
+                        def moduleGroupId = dep.group
+                        def moduleArtifactId = dep.name
+                        def moduleVersion = dep.version
+                        // 有一些依赖是不需要输出到 pom.xml 的。如 lombok
+                        if (moduleArtifactId == 'lombok') {
+                            println "不需要输出的依赖: ${moduleGroupId}:${moduleArtifactId}:${moduleVersion}"
+                        } else {
+                            def depNode = dependenciesNode.appendNode('dependency')
+                            depNode.appendNode('groupId', moduleGroupId)
+                            depNode.appendNode('artifactId', moduleArtifactId)
+                            depNode.appendNode('version', moduleVersion)
+//                          depNode.appendNode('scope', 'compile')
+                            println "非源自本项目的依赖: ${moduleGroupId}:${moduleArtifactId}:${moduleVersion}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
